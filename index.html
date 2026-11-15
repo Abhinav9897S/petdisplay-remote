@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Pet">
+<meta name="theme-color" content="#111111">
+<link rel="apple-touch-icon" href="icon.png">
+<title>Pet Display Remote</title>
+<style>
+:root{--bg:#111;--card:#1c1c1e;--btn:#2c2c2e;--acc:#0a84ff;--mut:#8e8e93}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{font-family:-apple-system,system-ui,sans-serif;background:var(--bg);color:#fff;margin:0 auto;
+padding:calc(env(safe-area-inset-top) + 14px) 14px calc(env(safe-area-inset-bottom) + 24px);max-width:520px}
+h1{font-size:26px;margin:4px 4px 2px}
+#st{color:var(--mut);font-size:13px;margin:0 4px 12px;min-height:18px}
+.card{background:var(--card);border-radius:16px;padding:12px;margin-bottom:12px}
+h3{margin:0 4px 8px;font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--mut)}
+.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+button{padding:13px 4px;border-radius:12px;border:0;background:var(--btn);color:#fff;font-size:16px;font-weight:500}
+button:active{transform:scale(.96)}
+button.on{background:var(--acc)}
+.row{display:flex;align-items:center;justify-content:space-between;padding:8px 4px;font-size:16px}
+.row small{color:var(--mut)}
+input[type=range]{width:100%;margin:4px 0 10px}
+input[type=color]{width:64px;height:40px;border:0;background:none;padding:0}
+input[type=checkbox]{width:50px;height:30px}
+input[type=text]{width:100%;padding:14px;border-radius:12px;border:0;background:var(--btn);color:#fff;font-size:16px}
+#toast{position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom) + 18px);transform:translateX(-50%);
+background:#000c;color:#fff;padding:8px 14px;border-radius:20px;font-size:13px;opacity:0;transition:opacity .2s;pointer-events:none}
+#toast.show{opacity:1}
+#setup{display:none}
+</style></head><body>
+<h1>Pet Display</h1><div id="st">Remote control</div>
+
+<div id="setup" class="card"><h3>Enter your key</h3>
+<p style="color:#8e8e93;font-size:14px;margin:4px">Paste the secret key that came with your display's link.</p>
+<input type="text" id="keyin" placeholder="secret key" autocapitalize="none" autocorrect="off">
+<button style="width:100%;margin-top:8px" onclick="saveKey()">Save</button></div>
+
+<div id="app">
+<div class="card"><h3>Mode</h3><div class="grid" id="mode"></div></div>
+<div class="card"><h3>Mood</h3><div class="grid" id="ex"></div></div>
+<div class="card"><h3>Do something</h3><div class="grid" id="act"></div></div>
+<div class="card"><h3>Look</h3><div class="grid" id="look"></div></div>
+<div class="card"><h3>Style</h3>
+<div class="row">Eye colour <input type="color" id="eye" value="#00e5ff"></div>
+<div class="row">Background <input type="color" id="bg" value="#000000"></div>
+<div class="row">Brightness <small id="brv"></small></div><input type="range" id="bright" min="0" max="255" value="255">
+<div class="row">Blink every <small id="blv"></small></div><input type="range" id="blink" min="2" max="15" value="4">
+<div class="row">Animation speed <small id="spv"></small></div><input type="range" id="speed" min="1" max="10" value="5">
+<div class="row">Random behaviours <input type="checkbox" id="idle" checked></div>
+</div>
+<p style="color:#8e8e93;font-size:12px;margin:4px">Commands reach the display within a few seconds. Anyone with this page's link can control it, so keep the link private.</p>
+</div>
+<div id="toast"></div>
+
+<script>
+const $=i=>document.getElementById(i);
+const EXPRS=['neutral','happy','sad','angry','shy','sleepy','love','surprised'];
+const NTFY='https://ntfy.sh/';
+let key=(location.hash||'').replace('#','')||localStorage.getItem('pdkey')||'';
+let tt;
+function toast(m){const t=$('toast');t.textContent=m;t.className='show';clearTimeout(tt);tt=setTimeout(()=>t.className='',1600)}
+function saveKey(){const k=$('keyin').value.trim().toLowerCase();if(!/^[a-z0-9]{8,}$/.test(k)){toast('That key does not look right');return}
+  localStorage.setItem('pdkey',k);location.hash=k;location.reload()}
+if(!key){$('setup').style.display='block';$('app').style.display='none'}
+else{localStorage.setItem('pdkey',key);if(location.hash!=='#'+key)history.replaceState(null,'','#'+key)}
+const T='pd-'+key;
+
+let s={mode:'auto',expr:'neutral',eye:'#00e5ff',bg:'#000000',bright:255,blink:4,idle:true,speed:5,playing:false,title:'',artist:''};
+
+function send(cmd){
+  return fetch(NTFY+T,{method:'POST',body:cmd,headers:{'Content-Type':'text/plain'}})
+    .then(r=>{if(!r.ok)throw 0;toast('Sent')}).catch(()=>toast('Could not reach the cloud'));
+}
+function btn(box,label,fn,on){const b=document.createElement('button');b.textContent=label;if(on)b.className='on';
+  b.onclick=()=>{if(navigator.vibrate)navigator.vibrate(8);fn()};$(box).appendChild(b)}
+function cap(x){return x[0].toUpperCase()+x.slice(1)}
+function set(k,v){s[k]=v;send('set?'+k+'='+encodeURIComponent(v));render()}
+
+function render(){
+  ['mode','ex','act','look'].forEach(i=>$(i).innerHTML='');
+  ['auto','eyes','spotify'].forEach(m=>btn('mode',cap(m),()=>set('mode',m),s.mode==m));
+  EXPRS.forEach(e=>btn('ex',cap(e),()=>set('expr',e),s.expr==e));
+  btn('act','Blink',()=>send('action?name=blink'));
+  btn('act','Wink ←',()=>send('action?name=wink&side=l'));
+  btn('act','Wink →',()=>send('action?name=wink&side=r'));
+  btn('act','Act shy',()=>send('action?name=expr&e=shy&ms=4000'));
+  btn('act','Show love',()=>send('action?name=expr&e=love&ms=3000'));
+  btn('act','Surprise!',()=>send('action?name=expr&e=surprised&ms=2000'));
+  [['↖','-1','-1'],['↑','0','-1'],['↗','1','-1'],['←','-1','0'],['●','0','0'],['→','1','0'],
+   ['↙','-1','1'],['↓','0','1'],['↘','1','1']].forEach(d=>btn('look',d[0],()=>send('action?name=look&x='+d[1]+'&y='+d[2])));
+  $('eye').value=s.eye;$('bg').value=s.bg;
+  $('bright').value=s.bright;$('brv').textContent=Math.round(s.bright/2.55)+'%';
+  $('blink').value=s.blink;$('blv').textContent=s.blink+'s';
+  $('speed').value=s.speed;$('spv').textContent=s.speed;$('idle').checked=!!s.idle;
+}
+$('eye').onchange=e=>set('eye',e.target.value);
+$('bg').onchange=e=>set('bg',e.target.value);
+$('bright').oninput=e=>$('brv').textContent=Math.round(e.target.value/2.55)+'%';
+$('bright').onchange=e=>set('bright',e.target.value);
+$('blink').oninput=e=>$('blv').textContent=e.target.value+'s';
+$('blink').onchange=e=>set('blink',e.target.value);
+$('speed').oninput=e=>$('spv').textContent=e.target.value;
+$('speed').onchange=e=>set('speed',e.target.value);
+$('idle').onchange=e=>set('idle',e.target.checked?1:0);
+
+// The display posts its state (when it changes); show the latest one.
+async function pull(){
+  try{
+    const r=await fetch(NTFY+T+'-s/json?poll=1&since=latest');
+    const lines=(await r.text()).trim().split('\n').filter(Boolean);
+    let msg=null;
+    for(const l of lines){try{const o=JSON.parse(l);if(o.event==='message')msg=o}catch(e){}}
+    if(msg){
+      const st=JSON.parse(msg.message);
+      if(!document.activeElement||document.activeElement.type!=='range'){s=Object.assign(s,st);render()}
+      const age=Math.max(0,Math.round(Date.now()/1000-msg.time));
+      const ago=age<90?'just now':age<5400?Math.round(age/60)+' min ago':Math.round(age/3600)+' h ago';
+      $('st').textContent=(s.playing?'♪ '+s.title+' – '+s.artist:'Nothing playing')+'  ·  updated '+ago;
+    }
+  }catch(e){}
+}
+if(key){render();pull();setInterval(pull,6000)}
+</script></body></html>
